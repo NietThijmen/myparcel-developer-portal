@@ -7,7 +7,8 @@
 //                      with the translated pages listed under "Optional".
 //   - `llms-full.txt`  the English guides, SDK pages and platform manuals in
 //                      one file. The API reference stays out: it is large and
-//                      has an `.md` file per API.
+//                      every API has its own `.md` file. Only the `/api/`
+//                      overview has none, because it renders from data.
 //
 // Every page also gets a `<link rel="alternate" type="text/markdown">` that
 // points to its `.md` file.
@@ -47,21 +48,25 @@ const title = (page: Page): string => String(page.frontmatter.title ?? page.titl
 
 const description = (page: Page): string => String(page.frontmatter.description ?? '').trim();
 
-/** Turn relative links between pages into absolute URLs, so a page still works outside its folder. Code is left alone. */
+// One pass over the Markdown. The first three alternatives match text that must
+// stay as it is, so the link rule never sees it:
+//   - a fenced code block, indented or not, with ``` or ~~~
+//   - an inline code span
+//   - an image: Vite emits images under a hashed path, so no URL built here
+//     would point to the file
+// The last alternative is the end of a link: `](href)` or `](href "title")`.
+const PRESERVE_OR_LINK =
+  /(^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\2[ \t]*$)|(`[^`\n]*`)|(!\[[^\]]*\]\([^)]*\))|\]\(([^)\s]+)((?:\s+(?:"[^"]*"|'[^']*'))?)\)/gm;
+
+/** Turn relative links between pages into absolute URLs, so a page still works outside its folder. Code and images are left alone. */
 function absolutizeLinks(markdown: string, page: Page): string {
   const base = mdUrl(page);
 
-  return markdown
-    .split(/(^```[\s\S]*?^```)/m)
-    .map((part, i) =>
-      i % 2 === 1
-        ? part
-        : part.replace(/\]\(([^)\s]+)\)/g, (match, href: string) => {
-            if (/^([a-z][a-z0-9+.-]*:|#|\/\/)/i.test(href)) return match;
-            return `](${new URL(href.replace(/\.html(#|$)/, '.md$1'), base).href})`;
-          }),
-    )
-    .join('');
+  return markdown.replace(PRESERVE_OR_LINK, (match, _fence, _fenceMarker, _code, _image, href?: string, title = '') => {
+    if (href === undefined || /^([a-z][a-z0-9+.-]*:|#|\/\/)/i.test(href)) return match;
+
+    return `](${new URL(href.replace(/\.html(#|$)/, '.md$1'), base).href}${title})`;
+  });
 }
 
 function renderMarkdown(page: Page): string {
@@ -86,7 +91,7 @@ function renderIndex(pages: Page[]): string {
   const lines = ['# MyParcel Developer Portal', '', `> ${SUMMARY}`, ''];
 
   lines.push(
-    'Every page below is Markdown. The API reference pages are generated from the live OpenAPI specs, for example https://api.myparcel.nl/openapi.yaml.',
+    'Every page below is Markdown, except the overview pages. The API reference pages are generated from the live OpenAPI specs, for example https://api.myparcel.nl/openapi.yaml.',
     '',
   );
 
